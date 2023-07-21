@@ -15,44 +15,49 @@ class CloudStorage(Enum):
     S3 = 1
     GCS = 2
 
-class ZarrDataset:
+class ZarrDataset: 
     """
-    Parameters for locating Zarr dataset living on the cloud.
-    Args:
-    cloud_storage: CloudStorage option 
-    bucket: Name of bucket
-    dataset_path: Path to directory containing zarr files within bucket
-    tile_names: List of zarr tiles to include in dataset. 
-                Order of tile_names defines an index that 
-                is expected to be used in tile_layout.
-    tile_layout: 2D array of indices that defines relative position of tiles.
-    downsample_exp: Level in image pyramid with each level
-                    downsampling the original resolution by 2**downsmaple_exp.
+    Load in base tile layout, tile names, and tile volumes
+    from a cloud Zarr dataset with the following naming convention: 
+    {tile_name}_X_{####}_Y_{####}_Z_{####}_CH_{###}_*.zarr
+    Ex: tile_X_0000_Y_0000_Z_0000_CH_405.zarr
+    X/Y/Z represents tile position and CH represents channel. 
+    
+    Default Tile Layout: 
+    o -- x
+    |
+    y
+    Overwrite tile_layout in a subclass for different x/y basis.
     """
-    # TODO: Update this documentation
-
     def __init__(self, 
                  cloud_storage: CloudStorage,
                  bucket: str, 
                  dataset_path: str, 
-                 downsample_exp: int, 
-                 camera_num: int = 1, 
-                 axis_flip: bool = True): 
+                 channel: int,
+                 downsample_exp: int): 
+        """
+        cloud_storage: CloudStorage option 
+        bucket: Name of bucket
+        dataset_path: Path to directory containing zarr files within bucket
+        channel: Image channel
+        downsample_exp: Level in image pyramid with each level
+                        downsampling the original resolution by 2**downsmaple_exp.
+        """
         
         self.cloud_storage = cloud_storage
         self.bucket = bucket
         self.dataset_path = dataset_path
+        self.channel = channel
         self.downsample_exp = downsample_exp
-        
+
         if self.cloud_storage == CloudStorage.GCS: 
-            # TODO: Not implemented yet error
-            pass
+            raise NotImplementedError
 
         # Parse and load tile paths into dataframe
         schema = {
-            'tile_name': [], 
-            'X': [], 
-            'Y': [],
+            'tile_name': [],
+            'X': [],
+            'Y': [], 
             'Z': [],
             'channel': []
         }
@@ -79,9 +84,10 @@ class ZarrDataset:
                 'X': x_pos,
                 'Y': y_pos,
                 'Z': z_pos,
-                'channel_num': channel_num
+                'channel': channel_num
             }
             df = df.append(new_entry, ignore_index=True)
+        df = df[df['channel'] == self.channel]
         
         # Init tile_names
         grouped_df = tile_df.groupby(['Y', 'X'])
@@ -98,34 +104,16 @@ class ZarrDataset:
             for x in range(x_shape): 
                 tile_layout[y, x] = tile_id
                 tile_id += 1
-        if camera_num == 1:
-            tile_layout = np.flipud(np.fliplr(tile_layout))
-        if axis_flip: 
-            tile_layout = np.transpose(tile_layout)
         self.tile_layout: np.ndarray = tile_layout
 
         # Init tile_volumes, tile_size_xyz
         tile_volumes, tile_size_xyz = self._load_zarr_data()
         self.tile_volumes: np.ndarray = tile_volumes
         self.tile_size_xyz: tuple[int, int, int] = tile_size_xyz
-        
-        # Init tile_mesh
-        # Initalization to coarse registration respecting deskewing
-        # tile_mesh holds relative offsets, therefore, only holds z positions. 
-        theta = 45
-        if camera_num == 1: 
-            theta = -45
-        deskew_factor = np.tan(np.deg2rad(theta))
-        deskew = np.array([[1, 0, 0], [0, 1, 0], [deskew_factor, 0, 1]])
 
-        tile_mesh = np.zeros((3, tile_layout.shape[0], tile_layout.shape[1]))
-        mx, my, mz = self.tile_size_xyz
-        for y in range(y_shape): 
-            for x in range(x_shape):
-                tile_position_xyz = np.array([x * mx, y * my, 0])
-                deskewed_position_xyz = deskew @ tile_position_xyz
-                tile_mesh[:, y, x] = np.array([0, 0, deskewed_position_xyz[2]])
-        self.tile_mesh: np.ndarray = tile_mesh 
+        # Init tile_mesh for coarse registration
+        # Shape is 3zyx, where z = 1. 
+        self.tile_mesh = np.zeros((3, 1, tile_layout.shape[0], tile_layout.shape[1]))
 
     def _load_zarr_data(self) -> tuple[list[ts.TensorStore], stitch_elastic.ShapeXYZ]:
         """
@@ -156,8 +144,75 @@ class ZarrDataset:
         # Standardize size of tile volumes
         for i, tile_vol in enumerate(tile_volumes):
             tile_volumes[i] = tile_vol[:, :, :min_z, :min_y, :min_x]
-            
+        
         return tile_volumes, tile_size_xyz
+
+class ExaSpimDataset(ZarrDataset):
+    """
+    Dataloading customized for ExaSPIM microscope datasets.
+    """
+    def __init__(self, 
+                 cloud_storage: CloudStorage,
+                 bucket: str, 
+                 dataset_path: str, 
+                 channel: int,
+                 downsample_exp: int):
+        """
+        Same parameters as parent class.
+        """
+        super().__init__(cloud_storage, 
+                         bucket, 
+                         dataset_path, 
+                         channel,
+                         downsample_exp)
+        
+        # Modify tile_layout, basis is mirrored
+        self.tile_layout = np.fliplr(self.tile_layout)
+    
+class DiSpimDataset(ZarrDataset): 
+    """
+    Dataloading customized for DiSPIM microscope datasets.
+    """
+    def __init__(self, 
+                 cloud_storage: CloudStorage,
+                 bucket: str, 
+                 dataset_path: str, 
+                 channel: int, 
+                 downsample_exp: int,
+                 camera_num: int = 1, 
+                 axis_flip: bool = True):
+        """
+        Added Parameters: 
+        camera_num: 0 or 1, input to deskewing. 
+        axis_flip: Tile naming convention: x -> y and y -> x. 
+        """
+        super().__init__(cloud_storage, 
+                         bucket, 
+                         dataset_path, 
+                         channel,
+                         downsample_exp)
+
+        # Modify tile_layout, basis dependent on camera/axis_flip: 
+        if camera_num == 1:
+            self.tile_layout = np.flipud(np.fliplr(self.tile_layout))
+        if axis_flip: 
+            self.tile_layout = np.transpose(self.tile_layout)
+
+        # Modify tile_mesh, needs to be deskewed: 
+        # tile_mesh holds relative offsets, therefore, only holds z positions. 
+        theta = 45
+        if camera_num == 1: 
+            theta = -45
+        deskew_factor = np.tan(np.deg2rad(theta))
+        deskew = np.array([[1, 0, 0], [0, 1, 0], [deskew_factor, 0, 1]])
+
+        mx, my, mz = self.tile_size_xyz
+        ly, lx = self.tile_layout.shape
+        for y in range(ly): 
+            for x in range(lx):
+                tile_position_xyz = np.array([x * mx, y * my, 0])
+                deskewed_position_xyz = deskew @ tile_position_xyz
+                self.tile_mesh[:, 0, y, x] = np.array([0, 0, deskewed_position_xyz[2]])
 
 
 def list_directories_s3(bucket_name: str): 
@@ -168,11 +223,6 @@ def list_directories_s3(bucket_name: str):
     for prefix in result.search("CommonPrefixes"):
         files.append(prefix.get("Prefix").strip("/"))
     return files
-
-
-def list_directories_gcp(): 
-    # TODO: Error, not supported/implemented yet. 
-    pass
 
 
 def open_zarr_gcs(bucket: str, path: str) -> ts.TensorStore:
@@ -194,40 +244,6 @@ def open_zarr_s3(bucket: str, path: str) -> ts.TensorStore:
             'base_url': f'https://{bucket}.s3.us-west-2.amazonaws.com/{path}',
         },
     }).result()
-
-
-def load_zarr_data(params: ZarrDataset
-                   ) -> tuple[list[ts.TensorStore], stitch_elastic.ShapeXYZ]:
-    """
-    Reads Zarr dataset from input location 
-    and returns list of equally-sized tensorstores
-    in matching order as ZarrDataset.tile_names and tile size. 
-    Tensorstores are cropped to tiles at origin to the smallest tile in the set.
-    """
-    
-    def load_zarr(bucket: str, tile_location: str) -> ts.TensorStore:
-        if params.cloud_storage == CloudStorage.S3:
-            return open_zarr_s3(bucket, tile_location)
-        else:  # cloud == 'gcs'
-            return open_zarr_gcs(bucket, tile_location)
-    tile_volumes = []
-    min_x, min_y, min_z = np.inf, np.inf, np.inf
-    for t_name in params.tile_names:
-        tile_location = f"{params.dataset_path}/{t_name}/{params.downsample_exp}"
-        tile = load_zarr(params.bucket, tile_location)
-        tile_volumes.append(tile)
-        
-        _, _, tz, ty, tx = tile.shape
-        min_x, min_y, min_z = int(np.minimum(min_x, tx)), \
-                              int(np.minimum(min_y, ty)), \
-                              int(np.minimum(min_z, tz))
-    tile_size_xyz = min_x, min_y, min_z
-
-    # Standardize size of tile volumes
-    for i, tile_vol in enumerate(tile_volumes):
-        tile_volumes[i] = tile_vol[:, :, :min_z, :min_y, :min_x]
-        
-    return tile_volumes, tile_size_xyz
 
 
 def write_zarr(bucket: str, shape: list, path: str): 

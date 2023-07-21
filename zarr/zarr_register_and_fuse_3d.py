@@ -1,5 +1,6 @@
 """Object Wrapper around SOFIMA on Zarr Datasets."""
 
+import copy
 import functools as ft
 import jax
 import jax.numpy as jnp
@@ -71,8 +72,7 @@ class ZarrFusion(warp.StitchAndRender3dTiles):
         if tile_id in self.cache:
             return self.cache[tile_id]
 
-        tile_volumes, tile_size_xyz = zarr_io.load_zarr_data(self.zarr_params)
-        tile = tile_volumes[tile_id]
+        tile = self.zarr_params.tile_volumes[tile_id]
         self.cache[tile_id] = SyncAdapter(tile[0,0,:,:,:])
         return self.cache[tile_id]
 
@@ -89,15 +89,15 @@ class ZarrStitcher:
         """
 
         self.input_zarr = input_zarr
-
-        self.tile_volumes: list[ts.TensorStore] = []  # 5D tczyx homogenous shape
-        self.tile_volumes, self.tile_size_xyz = zarr_io.load_zarr_data(input_zarr)
+        self.tile_volumes: list[ts.TensorStore] = input_zarr.tile_volumes
+        self.tile_size_xyz = input_zarr.tile_size_xyz
         self.tile_layout = input_zarr.tile_layout
 
         self.tile_map: dict[tuple[int, int], ts.TensorStore] = {}
         for y, row in enumerate(self.tile_layout):
             for x, tile_id in enumerate(row):
                 self.tile_map[(x, y)] = self.tile_volumes[tile_id]
+
 
     def run_coarse_registration(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -260,12 +260,8 @@ class ZarrStitcher:
         fusion_tile_size_zyx = self.tile_size_xyz[::-1]
         if downsample_exp != self.input_zarr.downsample_exp:
             # Reload the data at target resolution
-            fusion_zarr = zarr_io.ZarrDataset(self.input_zarr.cloud_storage,
-                                                self.input_zarr.bucket,
-                                                self.input_zarr.dataset_path, 
-                                                self.input_zarr.tile_names,
-                                                self.input_zarr.tile_layout,
-                                                downsample_exp)
+            fusion_zarr = copy.deepcopy(self.input_zarr)
+            fusion_zarr.downsample_exp = downsample_exp
 
             # Rescale fine mesh, stride
             curr_exp = self.input_zarr.downsample_exp
@@ -422,24 +418,22 @@ if __name__ == '__main__':
     cloud_storage = zarr_io.CloudStorage.S3
     bucket = 'aind-open-data'
     dataset_path = 'diSPIM_647459_2022-12-07_00-00-00/diSPIM.zarr'
+    channel = 405
     downsample_exp = 2
-    tile_names = ['tile_X_0000_Y_0000_Z_0000_CH_0405_cam1.zarr', 
-                    'tile_X_0001_Y_0000_Z_0000_CH_0405_cam1.zarr']
-    tile_layout = np.array([[1],
-                            [0]])
-    input_zarr = zarr_io.ZarrDataset(cloud_storage=cloud_storage,
-                                bucket=bucket,
-                                dataset_path=dataset_path, 
-                                tile_names=tile_names,
-                                tile_layout=tile_layout,
-                                downsample_exp=downsample_exp)
 
-    # Application Outputs
+    input_zarr = zarr_io.DiSpimDataset(cloud_storage, 
+                                       bucket, 
+                                       dataset_path, 
+                                       channel, 
+                                       downsample_exp, 
+                                       camera_num=1, 
+                                       axis_flip=True)
+    
+
+    # Example set of Application Outputs
     output_cloud_storage = zarr_io.CloudStorage.GCS
-    output_bucket = 'YOUR-BUCKET-HERE'
-    output_path = 'YOUR-OUTPUT-NAME.zarr' 
-    # output_bucket = 'sofima-test-bucket' 
-    # output_path = 'fused_level_2_refactor_skip.zarr'
+    output_bucket = 'sofima-test-bucket' 
+    output_path = 'fused_level_2_refactor_skip.zarr'
 
     # Processing
     save_mesh_path = 'solved_mesh_refactor.npz'
