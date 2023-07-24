@@ -1,5 +1,8 @@
 import boto3
+from botocore.exceptions import ClientError
 from enum import Enum
+import json
+import logging
 import numpy as np
 from pathlib import Path
 import pandas as pd
@@ -8,12 +11,21 @@ import tensorstore as ts
 
 from sofima import stitch_elastic
 
+
+LOG_FMT = "%(asctime)s %(message)s"
+LOG_DATE_FMT = "%Y-%m-%d %H:%M"
+logging.basicConfig(format=LOG_FMT, datefmt=LOG_DATE_FMT)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+
 class CloudStorage(Enum):
     """
     Documented Cloud Storage Options
     """
     S3 = 1
     GCS = 2
+
 
 class ZarrDataset: 
     """
@@ -52,8 +64,53 @@ class ZarrDataset:
 
         if self.cloud_storage == CloudStorage.GCS: 
             raise NotImplementedError
+        
+        self.tile_df = self._read_tilenames_into_dataframe()
+        self.channels: list[int] = self.tile_df['channel'].unique().tolist()
+        filtered_tile_df = self.tile_df[self.tile_df['channel'] == self.channel]
 
-        # Parse and load tile paths into dataframe
+        # Init tile_names
+        grouped_df = filtered_tile_df.groupby(['Y', 'X'])
+        sorted_grouped_df = grouped_df.apply(lambda x: x.sort_values(by=['Y', 'X'], ascending=[True, True]))
+        self.tile_names: list[str] = sorted_grouped_df['tile_name'].tolist()
+
+        # Init tile_layout
+        y_shape = filtered_tile_df['Y'].nunique()
+        x_shape = filtered_tile_df['X'].nunique()
+
+        tile_id = 0
+        tile_layout = np.zeros((y_shape, x_shape))
+        for y in range(y_shape): 
+            for x in range(x_shape): 
+                tile_layout[y, x] = tile_id
+                tile_id += 1
+        self.tile_layout: np.ndarray = np.int16(tile_layout)
+
+        # Init tile_volumes, tile_size_xyz
+        tile_volumes, tile_size_xyz = self._load_zarr_data()
+        self.tile_volumes: np.ndarray = tile_volumes
+        self.tile_size_xyz: tuple[int, int, int] = tile_size_xyz
+
+        # Init tile_mesh for coarse registration
+        # Shape is 3zyx, where z = 1. 
+        self.tile_mesh: np.ndarray = np.zeros((3, 1, tile_layout.shape[0], tile_layout.shape[1]))
+
+        # Init voxel sizes
+        zarray_json = read_json_s3(self.bucket, 
+                                   f'{dataset_path}/{self.tile_names[0]}/.zattrs')
+        scale_tczyx = zarray_json['multiscales'][0]['datasets'][0]['coordinateTransformations'][0]['scale']
+        self.vox_size_xyz: np.ndarray = np.array(scale_tczyx[2:][::-1])
+
+
+    def _read_tilenames_into_dataframe(self) -> pd.DataFrame:
+        """
+        Parse and load tile paths into dataframe with following schema: 
+        [tile_name: str, 
+         x: int, 
+         y: int, 
+         z: int, 
+         channel: int]
+        """
         schema = {
             'tile_name': [],
             'X': [],
@@ -61,9 +118,9 @@ class ZarrDataset:
             'Z': [],
             'channel': []
         }
-        tile_df = pd.Dataframe(schema)
-        for tile_path in list_directories_s3(bucket):
-            tile_name = Path(tile_path).stem
+        tile_df = pd.DataFrame(schema)
+        for tile_path in list_directories_s3(self.bucket, self.dataset_path):
+            tile_name = Path(tile_path).name
             if tile_name == '.zgroup':
                 continue
 
@@ -86,34 +143,8 @@ class ZarrDataset:
                 'Z': z_pos,
                 'channel': channel_num
             }
-            df = df.append(new_entry, ignore_index=True)
-        df = df[df['channel'] == self.channel]
-        
-        # Init tile_names
-        grouped_df = tile_df.groupby(['Y', 'X'])
-        sorted_grouped_df = grouped_df.apply(lambda x: x.sort_values(by=['Y', 'X'], ascending=[True, True]))
-        self.tile_names: list[str] = sorted_grouped_df['tile_name'].tolist()
-
-        # Init tile_layout
-        y_shape = len(grouped_df['Y'].nunique())
-        x_shape = len(grouped_df['X'].nunique())
-
-        tile_id = 0
-        tile_layout = np.zeros((y_shape, x_shape))
-        for y in range(y_shape): 
-            for x in range(x_shape): 
-                tile_layout[y, x] = tile_id
-                tile_id += 1
-        self.tile_layout: np.ndarray = tile_layout
-
-        # Init tile_volumes, tile_size_xyz
-        tile_volumes, tile_size_xyz = self._load_zarr_data()
-        self.tile_volumes: np.ndarray = tile_volumes
-        self.tile_size_xyz: tuple[int, int, int] = tile_size_xyz
-
-        # Init tile_mesh for coarse registration
-        # Shape is 3zyx, where z = 1. 
-        self.tile_mesh = np.zeros((3, 1, tile_layout.shape[0], tile_layout.shape[1]))
+            tile_df.loc[len(tile_df)] = new_entry
+        return tile_df
 
     def _load_zarr_data(self) -> tuple[list[ts.TensorStore], stitch_elastic.ShapeXYZ]:
         """
@@ -147,6 +178,7 @@ class ZarrDataset:
         
         return tile_volumes, tile_size_xyz
 
+
 class ExaSpimDataset(ZarrDataset):
     """
     Dataloading customized for ExaSPIM microscope datasets.
@@ -168,7 +200,10 @@ class ExaSpimDataset(ZarrDataset):
         
         # Modify tile_layout, basis is mirrored
         self.tile_layout = np.fliplr(self.tile_layout)
-    
+        # Update tile_mesh accordingly
+        self.tile_mesh = np.zeros((3, 1, self.tile_layout.shape[0], self.tile_layout.shape[1]))
+
+
 class DiSpimDataset(ZarrDataset): 
     """
     Dataloading customized for DiSPIM microscope datasets.
@@ -192,20 +227,25 @@ class DiSpimDataset(ZarrDataset):
                          channel,
                          downsample_exp)
 
+        # Filter tile_names, tile_volumes by camera_num
+        self.tile_volumes = self.tile_volumes[camera_num::2]
+        self.tile_names = self.tile_names[camera_num::2]
+
         # Modify tile_layout, basis dependent on camera/axis_flip: 
         if camera_num == 1:
             self.tile_layout = np.flipud(np.fliplr(self.tile_layout))
         if axis_flip: 
             self.tile_layout = np.transpose(self.tile_layout)
 
-        # Modify tile_mesh, needs to be deskewed: 
+        # Modify tile_mesh: deskew and update to tile_layout shape
         # tile_mesh holds relative offsets, therefore, only holds z positions. 
-        theta = 45
+        self.theta = 45
         if camera_num == 1: 
-            theta = -45
-        deskew_factor = np.tan(np.deg2rad(theta))
+            self.theta = -45
+        deskew_factor = np.tan(np.deg2rad(self.theta))
         deskew = np.array([[1, 0, 0], [0, 1, 0], [deskew_factor, 0, 1]])
 
+        self.tile_mesh = np.zeros((3, 1, self.tile_layout.shape[0], self.tile_layout.shape[1]))
         mx, my, mz = self.tile_size_xyz
         ly, lx = self.tile_layout.shape
         for y in range(ly): 
@@ -215,14 +255,40 @@ class DiSpimDataset(ZarrDataset):
                 self.tile_mesh[:, 0, y, x] = np.array([0, 0, deskewed_position_xyz[2]])
 
 
-def list_directories_s3(bucket_name: str): 
+def list_directories_s3(bucket_name: str, 
+                        directory: str):
+    if directory.endswith('/') is False:
+        directory = directory + '/'
+
+    client = boto3.client('s3')
+    result = client.list_objects(Bucket=bucket_name, Prefix=directory, Delimiter='/')
+
     files: list[str] = []
-    client = boto3.client("s3")
-    paginator = client.get_paginator("list_objects")
-    result = paginator.paginate(Bucket=bucket_name, Delimiter="/")
-    for prefix in result.search("CommonPrefixes"):
-        files.append(prefix.get("Prefix").strip("/"))
+    for o in result.get('CommonPrefixes'):
+        files.append(o.get('Prefix'))
+
     return files
+
+
+def read_json_s3(bucket_name: str,
+                 json_path: str) -> dict:
+
+    s3 = boto3.resource("s3")
+    content_object = s3.Object(bucket_name, json_path)
+
+    try:
+        file_content = content_object.get()["Body"].read().decode("utf-8")
+        json_content = json.loads(file_content)
+    except ClientError as ex:
+        if ex.response["Error"]["Code"] == "NoSuchKey":
+            json_content = {}
+            print(
+                f"An error occurred when trying to read json file from {json_path}"
+            )
+        else:
+            raise
+
+    return json_content
 
 
 def open_zarr_gcs(bucket: str, path: str) -> ts.TensorStore:
