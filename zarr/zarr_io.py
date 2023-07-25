@@ -203,8 +203,12 @@ class ExaSpimDataset(ZarrDataset):
         # Update tile_mesh accordingly
         self.tile_mesh = np.zeros((3, 1, self.tile_layout.shape[0], self.tile_layout.shape[1]))
 
+        # Flip in X!
+        self.basis_change = np.array([[-1, 0, 0], 
+                                      [0, 1, 0], 
+                                      [0, 0, 1]])
 
-class DiSpimDataset(ZarrDataset): 
+class DiSpimDataset(ZarrDataset):
     """
     Dataloading customized for DiSPIM microscope datasets.
     """
@@ -245,6 +249,16 @@ class DiSpimDataset(ZarrDataset):
         deskew_factor = np.tan(np.deg2rad(self.theta))
         deskew = np.array([[1, 0, 0], [0, 1, 0], [deskew_factor, 0, 1]])
 
+        # Flip in X and Y!
+        self.basis_change = np.array([[-1, 0, 0], 
+                                      [0, -1, 0], 
+                                      [0, 0, 1]])
+        if axis_flip:
+            flip = np.array([[0, 1, 0], 
+                             [1, 0, 0], 
+                             [0, 0, 1]])
+            self.basis_change = flip @ self.basis_change
+
         self.tile_mesh = np.zeros((3, 1, self.tile_layout.shape[0], self.tile_layout.shape[1]))
         mx, my, mz = self.tile_size_xyz
         ly, lx = self.tile_layout.shape
@@ -253,7 +267,7 @@ class DiSpimDataset(ZarrDataset):
                 tile_position_xyz = np.array([x * mx, y * my, 0])
                 deskewed_position_xyz = deskew @ tile_position_xyz
                 self.tile_mesh[:, 0, y, x] = np.array([0, 0, deskewed_position_xyz[2]])
-
+                self.tile_mesh[:, 0, y, x] = self.basis_change @ self.tile_mesh[:, 0, y, x]
 
 def list_directories_s3(bucket_name: str, 
                         directory: str):
