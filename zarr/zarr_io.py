@@ -203,7 +203,7 @@ class ExaSpimDataset(ZarrDataset):
         # Update tile_mesh accordingly
         self.tile_mesh = np.zeros((3, 1, self.tile_layout.shape[0], self.tile_layout.shape[1]))
 
-        # Flip in X!
+        # Mirror in X!
         self.basis_change = np.array([[-1, 0, 0], 
                                       [0, 1, 0], 
                                       [0, 0, 1]])
@@ -231,9 +231,15 @@ class DiSpimDataset(ZarrDataset):
                          channel,
                          downsample_exp)
 
+        self.camera_num = camera_num
+        self.axis_flip = axis_flip
+
         # Filter tile_names, tile_volumes by camera_num
-        self.tile_volumes = self.tile_volumes[camera_num::2]
-        self.tile_names = self.tile_names[camera_num::2]
+        # Only applies if both camera streams are collected 
+        match = re.search(r'(cam|CAM)', self.tile_names[0])
+        if match: 
+            self.tile_volumes = self.tile_volumes[camera_num::2]
+            self.tile_names = self.tile_names[camera_num::2]
 
         # Modify tile_layout, basis dependent on camera/axis_flip: 
         if camera_num == 1:
@@ -249,7 +255,7 @@ class DiSpimDataset(ZarrDataset):
         deskew_factor = np.tan(np.deg2rad(self.theta))
         deskew = np.array([[1, 0, 0], [0, 1, 0], [deskew_factor, 0, 1]])
 
-        # Flip in X and Y!
+        # Mirror in X and Y!
         self.basis_change = np.array([[-1, 0, 0], 
                                       [0, -1, 0], 
                                       [0, 0, 1]])

@@ -1,6 +1,5 @@
 """Object Wrapper around SOFIMA on Zarr Datasets."""
 
-import copy
 import functools as ft
 import jax
 import jax.numpy as jnp
@@ -259,9 +258,22 @@ class ZarrStitcher:
         fusion_stride_zyx = stride_zyx
         fusion_tile_size_zyx = self.tile_size_xyz[::-1]
         if downsample_exp != self.input_zarr.downsample_exp:
-            # Reload the data at target resolution
-            fusion_zarr = copy.deepcopy(self.input_zarr)
-            fusion_zarr.downsample_exp = downsample_exp
+            # Reload the data at target resolution, manual copy constructors
+            if isinstance(self.input_zarr, zarr_io.DiSpimDataset):
+                fusion_zarr = zarr_io.DiSpimDataset(self.input_zarr.cloud_storage, 
+                                                    self.input_zarr.bucket, 
+                                                    self.input_zarr.dataset_path,
+                                                    self.input_zarr.channel, 
+                                                    downsample_exp=downsample_exp,
+                                                    camera_num=self.input_zarr.camera_num,
+                                                    axis_flip=self.input_zarr.axis_flip)
+
+            if isinstance(self.input_zarr, zarr_io.ExaSpimDataset):
+                fusion_zarr = zarr_io.ExaSpimDataset(self.input_zarr.cloud_storage, 
+                                                    self.input_zarr.bucket, 
+                                                    self.input_zarr.dataset_path,
+                                                    self.input_zarr.channel, 
+                                                    downsample_exp=downsample_exp)
 
             # Rescale fine mesh, stride
             curr_exp = self.input_zarr.downsample_exp
@@ -334,9 +346,14 @@ class ZarrStitcher:
                               offset_xyz=crop_offset, 
                               parallelism=parallelism)
 
+        # box_size = (512, 512, 512)
+        box_size = (1024, 1024, 1024)
+        # box_size = (512 * 3, 512 * 3, 512 * 3)
+        # box_size = (2048, 2048, 2048)
+
         box = bounding_box.BoundingBox(start=(0,0,0), size=ds_out.shape[4:1:-1])  # Needs xyz 
-        gen = box_generator.BoxGenerator(box, (512, 512, 512), (0, 0, 0), True) # These are xyz
-        renderer.set_effective_subvol_and_overlap((512, 512, 512), (0, 0, 0))
+        gen = box_generator.BoxGenerator(box, box_size, (0, 0, 0), True) # These are xyz
+        renderer.set_effective_subvol_and_overlap(box_size, (0, 0, 0))
         for i, sub_box in enumerate(gen.boxes):
             t_start = time.time()
 
