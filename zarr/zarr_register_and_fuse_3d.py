@@ -107,7 +107,10 @@ class ZarrStitcher:
         cy: tile_layout shape
             Each entry represents displacement of current tile towards bottom neighbor. 
         coarse_mesh: (3, 1, tile_layout) shape
-            Each entry net displacement of current tile. 
+            Each entry net displacement of current tile.
+
+        log_ predicate, offsets wrt to parent tile
+        sofima_ predicate, offsets wrt to child tile
         """
 
         # Custom data loading for coarse registration
@@ -115,26 +118,40 @@ class ZarrStitcher:
         for vol in self.tile_volumes:
             _tile_volumes.append(vol.T[:,:,:,0,0])
 
-        cx, cy = coarse_registration.compute_coarse_offsets(self.tile_layout, _tile_volumes)
-        coarse_mesh = stitch_rigid.optimize_coarse_mesh(cx, 
-                                                        cy, 
+        log_cx, log_cy = coarse_registration.compute_coarse_offsets(self.tile_layout, _tile_volumes)
+        log_coarse_mesh = stitch_rigid.optimize_coarse_mesh(log_cx, 
+                                                        log_cy, 
                                                         mesh_fn=stitch_rigid.elastic_tile_mesh_3d)
-        return cx, cy, coarse_mesh
+        
+        sofima_cx = np.copy(log_cx)
+        sofima_cy = np.copy(log_cy)
+        for y in range(0, log_cx.shape[-2:][0]):
+            for x in range(0, log_cx.shape[-2:][1] - 1):
+                sofima_cx[0, 0, y, x] = log_cx[0, 0, y, x] - self.tile_size_xyz[0]
+        for y in range(0, log_cy.shape[-2:][0] - 1):
+            for x in range(0, log_cy.shape[-2:][1]):
+                sofima_cy[1, 0, y, x] = log_cy[1, 0, y, x] - self.tile_size_xyz[1]
+
+        sofima_coarse_mesh = stitch_rigid.optimize_coarse_mesh(sofima_cx, 
+                                                               sofima_cy, 
+                                                               mesh_fn=stitch_rigid.elastic_tile_mesh_3d)
+
+        return log_cx, log_cy, log_coarse_mesh, sofima_cx, sofima_cy, sofima_coarse_mesh
 
 
     def run_fine_registration(self, 
-                              cx: np.ndarray, 
-                              cy: np.ndarray, 
-                              coarse_mesh: np.ndarray, 
+                              sofima_cx: np.ndarray, 
+                              sofima_cy: np.ndarray, 
+                              sofima_coarse_mesh: np.ndarray, 
                               stride_zyx: tuple[int, int, int],
                               save_mesh_path: str = "solved_meshes.npy"
                               ) -> None: 
         """
         Runs fine registration.
         Inputs:
-        cx: Coarse offsets in x direction, output of coarse registration.
-        cy: Coarse offsets in y direction, output of coarse registration.
-        coarse_mesh: Coarse offsets in combined array, output of coarse registration.
+        sofima_cx: Coarse offsets in x direction, output of coarse registration.
+        sofima_cy: Coarse offsets in y direction, output of coarse registration.
+        sofima_coarse_mesh: Coarse offsets in combined array, output of coarse registration.
         stride_zyx: Subdivision of each tile to create fine mesh. 
 
         Outputs (inside of output mesh path):
@@ -153,21 +170,12 @@ class ZarrStitcher:
         # For axis 0, subtract tile_size x from the offset[0]
         # For axis 1, subtract tile_size y from the offset[1]
         # Tile size is readded inside of stitch_elastic.compute_flow_map3d.
+        cx = sofima_cx
+        cy = sofima_cy
+        coarse_mesh = sofima_coarse_mesh
         cx[np.isnan(cx)] = 0
         cy[np.isnan(cy)] = 0
-        # cx[:, :, 1:, 1:] = cx[:, :, 1:, 1:] - np.array([self.tile_size_xyz[0], 0, 0])  # cx[b, ...] is in xyz order
-        # cy[:, :, 1:, 1:] = cy[:, :, 1:, 1:] - np.array([0, self.tile_size_xyz[1], 0])
         
-        for y in range(0, cx.shape[-2:][0]):
-            for x in range(0, cx.shape[-2:][1] - 1):
-                cx[0, 0, y, x] = cx[0, 0, y, x] - self.tile_size_xyz[0]
-                cx[1, 0, y, x] = cx[1, 0, y, x]
-        
-        for y in range(0, cy.shape[-2:][0] - 1):
-            for x in range(0, cy.shape[-2:][1]):
-                cy[0, 0, y, x] = cy[0, 0, y, x]
-                cy[1, 0, y, x] = cy[1, 0, y, x] - self.tile_size_xyz[1]
-
         flow_x, offsets_x = stitch_elastic.compute_flow_map3d(_tile_map,
                                                                 self.tile_size_xyz, 
                                                                 cx, axis=0,
@@ -223,8 +231,8 @@ class ZarrStitcher:
                     output_bucket: str, 
                     output_path: str,
                     downsample_exp: int,
-                    cx: np.ndarray, 
-                    cy: np.ndarray, 
+                    sofima_cx: np.ndarray,
+                    sofima_cy: np.ndarray,
                     tile_mesh_path: str, 
                     parallelism: int = 16
                     ) -> None: 
@@ -235,7 +243,7 @@ class ZarrStitcher:
             Output storage parameters  
         downsample_exp: 
             Desired output resolution level, 0 for highest resolution.
-        cx, cy: 
+        sofima_cx, sofima_cy: 
             Output of coarse registration
         tile_mesh_path: 
             Output of elastic registration
@@ -317,11 +325,11 @@ class ZarrStitcher:
         print(f'{crop_offset=}')
 
         # Fused shape
-        cx[np.isnan(cx)] = 0    
-        cy[np.isnan(cy)] = 0
-        x_overlap = cx[2,0,0,0] / self.tile_size_xyz[0]
-        y_overlap = cy[1,0,0,0] / self.tile_size_xyz[1]
-        y_shape, x_shape = cx.shape[2], cx.shape[3]
+        sofima_cx[np.isnan(sofima_cx)] = 0    
+        sofima_cy[np.isnan(sofima_cy)] = 0
+        x_overlap = (sofima_cx[2,0,0,0] + self.tile_size_xyz[0]) / self.tile_size_xyz[0]
+        y_overlap = (sofima_cy[1,0,0,0] + self.tile_size_xyz[1]) / self.tile_size_xyz[1]
+        y_shape, x_shape = sofima_cx.shape[2], sofima_cx.shape[3]
 
         fused_x = fusion_tile_size_zyx[2] * (1 + ((x_shape - 1) * (1 - x_overlap)))
         fused_y = fusion_tile_size_zyx[1] * (1 + ((y_shape - 1) * (1 - y_overlap)))
@@ -378,9 +386,9 @@ class ZarrStitcher:
                                   output_bucket: str, 
                                   output_path: str,
                                   downsample_exp: int,
-                                  cx: np.ndarray, 
-                                  cy: np.ndarray,
-                                  coarse_mesh: np.ndarray,
+                                  sofima_cx: np.ndarray, 
+                                  sofima_cy: np.ndarray,
+                                  sofima_coarse_mesh: np.ndarray,
                                   stride_zyx: tuple[int, int, int] = (20, 20, 20),
                                   save_mesh_path: str = "solved_meshes.npy",
                                   parallelism: int = 16) -> None:
@@ -411,10 +419,11 @@ class ZarrStitcher:
         mesh_shape = (np.array(self.tile_size_xyz[::-1]) // stride_zyx).tolist()
         fine_mesh = np.zeros([dim, len(fine_mesh_xy_to_index)] + mesh_shape, dtype=np.float32)
         for (tx, ty) in list(self.tile_map.keys()): 
-            fine_mesh[:, fine_mesh_xy_to_index[tx, ty], ...] = coarse_mesh[:, 0, ty, tx].reshape(
+            fine_mesh[:, fine_mesh_xy_to_index[tx, ty], ...] = sofima_coarse_mesh[:, 0, ty, tx].reshape(
             (dim,) + (1,) * dim)
     
         # Save the mesh/mesh index map 
+        save_mesh_path = 'our_fine_mesh_inverted_offsets.npz'
         np.savez_compressed(save_mesh_path, 
                             x=fine_mesh, 
                             key_to_idx=fine_mesh_xy_to_index, 
@@ -424,10 +433,11 @@ class ZarrStitcher:
                         output_bucket, 
                         output_path,
                         downsample_exp,
-                        cx, 
-                        cy, 
+                        sofima_cx, 
+                        sofima_cy, 
                         save_mesh_path,
                         parallelism)
+        
 
 
 if __name__ == '__main__':
