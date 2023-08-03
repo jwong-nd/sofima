@@ -421,7 +421,12 @@ class ZarrStitcher:
         for (tx, ty) in list(self.tile_map.keys()): 
             fine_mesh[:, fine_mesh_xy_to_index[tx, ty], ...] = sofima_coarse_mesh[:, 0, ty, tx].reshape(
             (dim,) + (1,) * dim)
-    
+
+        # HACK: Must add noise for a convex hull calculation inside fusion 
+        f1, f2, f3, f4, f5 = fine_mesh.shape
+        noise = (np.random.rand(f1, f2, f3, f4, f5) * 2) - 1 
+        fine_mesh = fine_mesh + noise
+
         # Save the mesh/mesh index map 
         save_mesh_path = 'our_fine_mesh_inverted_offsets.npz'
         np.savez_compressed(save_mesh_path, 
