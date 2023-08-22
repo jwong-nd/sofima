@@ -12,13 +12,6 @@ import tensorstore as ts
 from sofima import stitch_elastic
 
 
-LOG_FMT = "%(asctime)s %(message)s"
-LOG_DATE_FMT = "%Y-%m-%d %H:%M"
-logging.basicConfig(format=LOG_FMT, datefmt=LOG_DATE_FMT)
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-
 class CloudStorage(Enum):
     """
     Documented Cloud Storage Options
@@ -91,10 +84,6 @@ class ZarrDataset:
         self.tile_volumes: np.ndarray = tile_volumes
         self.tile_size_xyz: tuple[int, int, int] = tile_size_xyz
 
-        # Init tile_mesh for coarse registration
-        # Shape is 3zyx, where z = 1. 
-        self.tile_mesh: np.ndarray = np.zeros((3, 1, tile_layout.shape[0], tile_layout.shape[1]))
-
         # Init voxel sizes
         zarray_json = read_json_s3(self.bucket, 
                                    f'{dataset_path}/{self.tile_names[0]}/.zattrs')
@@ -152,21 +141,37 @@ class ZarrDataset:
         and returns list of equally-sized tensorstores
         in matching order as ZarrDataset.tile_names and tile size. 
         Tensorstores are cropped to tiles at origin to the smallest tile in the set.
-        """
         
+        Throws an error if zarr tiles are not homogeneous in size.
+        """
+
         def load_zarr(bucket: str, tile_location: str) -> ts.TensorStore:
             if self.cloud_storage == CloudStorage.S3:
                 return open_zarr_s3(bucket, tile_location)
             else:  # cloud == 'gcs'
                 return open_zarr_gcs(bucket, tile_location)
+        
         tile_volumes = []
         min_x, min_y, min_z = np.inf, np.inf, np.inf
-        for t_name in self.tile_names:
+
+        # Average for QC 
+        AVERAGE_TOLERANCE = 100
+        cum_sum_zyx = np.array([0, 0, 0])
+
+        for num, t_name in enumerate(self.tile_names):
             tile_location = f"{self.dataset_path}/{t_name}/{self.downsample_exp}"
             tile = load_zarr(self.bucket, tile_location)
             tile_volumes.append(tile)
             
             _, _, tz, ty, tx = tile.shape
+            cum_sum_zyx += np.array([tz, ty, tx])
+            avg_zyx = cum_sum_zyx / (num + 1.)
+            assert abs(avg_zyx[0] - tz) < AVERAGE_TOLERANCE and \
+                   abs(avg_zyx[1] - ty) < AVERAGE_TOLERANCE and \
+                   abs(avg_zyx[2] - tx) < AVERAGE_TOLERANCE, \
+                f'Average zyx shape is {(avg_zyx[0], avg_zyx[1], avg_zyx[2])} and' + \
+                f'Shape of {t_name} is {(tz, ty, tx)}.'
+
             min_x, min_y, min_z = int(np.minimum(min_x, tx)), \
                                 int(np.minimum(min_y, ty)), \
                                 int(np.minimum(min_z, tz))
@@ -177,6 +182,29 @@ class ZarrDataset:
             tile_volumes[i] = tile_vol[:, :, :min_z, :min_y, :min_x]
         
         return tile_volumes, tile_size_xyz
+
+class SmartSpimDataset(ZarrDataset):
+    """
+    Dataloading customized for SmartSPIM microscope datasets.
+    """
+    def __init__(self, 
+                 cloud_storage: CloudStorage,
+                 bucket: str, 
+                 dataset_path: str, 
+                 channel: int,
+                 downsample_exp: int):
+        """
+        Same parameters as parent class.
+        """
+        super().__init__(cloud_storage, 
+                         bucket, 
+                         dataset_path, 
+                         channel,
+                         downsample_exp)
+        
+        # TODO: Update tile_layout
+        # TODO: Add any prerequisite tile transforms
+        # to match orientation expected by processing dispim datasets thus far. 
 
 
 class ExaSpimDataset(ZarrDataset):
@@ -200,13 +228,9 @@ class ExaSpimDataset(ZarrDataset):
         
         # Modify tile_layout, basis is mirrored
         self.tile_layout = np.fliplr(self.tile_layout)
-        # Update tile_mesh accordingly
-        self.tile_mesh = np.zeros((3, 1, self.tile_layout.shape[0], self.tile_layout.shape[1]))
 
-        # Mirror in X!
-        self.basis_change = np.array([[-1, 0, 0], 
-                                      [0, 1, 0], 
-                                      [0, 0, 1]])
+        # TODO: Add any prerequisite tile transforms
+        # to match orientation expected by processing dispim datasets thus far. 
 
 class DiSpimDataset(ZarrDataset):
     """
@@ -247,33 +271,10 @@ class DiSpimDataset(ZarrDataset):
         if axis_flip: 
             self.tile_layout = np.transpose(self.tile_layout)
 
-        # Modify tile_mesh: deskew and update to tile_layout shape
-        # tile_mesh holds relative offsets, therefore, only holds z positions. 
+        # Store deskewing angle
         self.theta = 45
         if camera_num == 1: 
             self.theta = -45
-        deskew_factor = np.tan(np.deg2rad(self.theta))
-        deskew = np.array([[1, 0, 0], [0, 1, 0], [deskew_factor, 0, 1]])
-
-        # Mirror in X and Y!
-        self.basis_change = np.array([[-1, 0, 0], 
-                                      [0, -1, 0], 
-                                      [0, 0, 1]])
-        if axis_flip:
-            flip = np.array([[0, 1, 0], 
-                             [1, 0, 0], 
-                             [0, 0, 1]])
-            self.basis_change = flip @ self.basis_change
-
-        self.tile_mesh = np.zeros((3, 1, self.tile_layout.shape[0], self.tile_layout.shape[1]))
-        mx, my, mz = self.tile_size_xyz
-        ly, lx = self.tile_layout.shape
-        for y in range(ly): 
-            for x in range(lx):
-                tile_position_xyz = np.array([x * mx, y * my, 0])
-                deskewed_position_xyz = deskew @ tile_position_xyz
-                self.tile_mesh[:, 0, y, x] = np.array([0, 0, deskewed_position_xyz[2]])
-                self.tile_mesh[:, 0, y, x] = self.basis_change @ self.tile_mesh[:, 0, y, x]
 
 def list_directories_s3(bucket_name: str, 
                         directory: str):
