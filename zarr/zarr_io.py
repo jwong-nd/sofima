@@ -1,5 +1,3 @@
-import boto3
-from botocore.exceptions import ClientError
 from enum import Enum
 import json
 import logging
@@ -275,42 +273,6 @@ class DiSpimDataset(ZarrDataset):
         self.theta = 45
         if camera_num == 1: 
             self.theta = -45
-
-def list_directories_s3(bucket_name: str, 
-                        directory: str):
-    if directory.endswith('/') is False:
-        directory = directory + '/'
-
-    client = boto3.client('s3')
-    result = client.list_objects(Bucket=bucket_name, Prefix=directory, Delimiter='/')
-
-    files: list[str] = []
-    for o in result.get('CommonPrefixes'):
-        files.append(o.get('Prefix'))
-
-    return files
-
-
-def read_json_s3(bucket_name: str,
-                 json_path: str) -> dict:
-
-    s3 = boto3.resource("s3")
-    content_object = s3.Object(bucket_name, json_path)
-
-    try:
-        file_content = content_object.get()["Body"].read().decode("utf-8")
-        json_content = json.loads(file_content)
-    except ClientError as ex:
-        if ex.response["Error"]["Code"] == "NoSuchKey":
-            json_content = {}
-            print(
-                f"An error occurred when trying to read json file from {json_path}"
-            )
-        else:
-            raise
-
-    return json_content
-
 
 def open_zarr_gcs(bucket: str, path: str) -> ts.TensorStore:
     return ts.open({
