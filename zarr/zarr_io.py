@@ -373,12 +373,12 @@ def write_zarr(bucket: str, shape: list, path: str):
 
 
 def write_zarr_local(shape: list): 
-    ts.open({
+    return ts.open({
         'driver': 'zarr', 
         'dtype': 'uint16',
         'kvstore' : {
             'driver': 'file', 
-            'bucket': 'tmp/dataset',
+            'path': 'tmp/dataset',
         }, 
         'create': True,
         'delete_existing': True, 
