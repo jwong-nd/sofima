@@ -1,3 +1,5 @@
+# import boto3
+# from botocore.exceptions import ClientError
 from enum import Enum
 import json
 import logging
@@ -83,11 +85,11 @@ class ZarrDataset:
         self.tile_size_xyz: tuple[int, int, int] = tile_size_xyz
 
         # Init voxel sizes
-        zarray_json = read_json_s3(self.bucket, 
-                                   f'{dataset_path}/{self.tile_names[0]}/.zattrs')
-        scale_tczyx = zarray_json['multiscales'][0]['datasets'][0]['coordinateTransformations'][0]['scale']
-        self.vox_size_xyz: np.ndarray = np.array(scale_tczyx[2:][::-1])
-
+        # zarray_json = read_json_s3(self.bucket, 
+        #                            f'{dataset_path}/{self.tile_names[0]}/.zattrs')
+        # scale_tczyx = zarray_json['multiscales'][0]['datasets'][0]['coordinateTransformations'][0]['scale']
+        # self.vox_size_xyz: np.ndarray = np.array(scale_tczyx[2:][::-1])
+        self.vox_size_xyz = np.array([0.298, 0.298, 0.176])
 
     def _read_tilenames_into_dataframe(self) -> pd.DataFrame:
         """
@@ -106,7 +108,8 @@ class ZarrDataset:
             'channel': []
         }
         tile_df = pd.DataFrame(schema)
-        for tile_path in list_directories_s3(self.bucket, self.dataset_path):
+        # for tile_path in list_directories_s3(self.bucket, self.dataset_path):
+        for tile_path in ['diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0000_Y_0000_Z_0000_CH_0405_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0000_Y_0000_Z_0000_CH_0405_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0000_Y_0000_Z_0000_CH_0488_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0000_Y_0000_Z_0000_CH_0488_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0000_Y_0000_Z_0000_CH_0561_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0000_Y_0000_Z_0000_CH_0561_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0000_Y_0000_Z_0000_CH_0638_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0000_Y_0000_Z_0000_CH_0638_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0001_Y_0000_Z_0000_CH_0405_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0001_Y_0000_Z_0000_CH_0405_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0001_Y_0000_Z_0000_CH_0488_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0001_Y_0000_Z_0000_CH_0488_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0001_Y_0000_Z_0000_CH_0561_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0001_Y_0000_Z_0000_CH_0561_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0001_Y_0000_Z_0000_CH_0638_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0001_Y_0000_Z_0000_CH_0638_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0002_Y_0000_Z_0000_CH_0405_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0002_Y_0000_Z_0000_CH_0405_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0002_Y_0000_Z_0000_CH_0488_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0002_Y_0000_Z_0000_CH_0488_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0002_Y_0000_Z_0000_CH_0561_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0002_Y_0000_Z_0000_CH_0561_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0002_Y_0000_Z_0000_CH_0638_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0002_Y_0000_Z_0000_CH_0638_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0003_Y_0000_Z_0000_CH_0405_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0003_Y_0000_Z_0000_CH_0405_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0003_Y_0000_Z_0000_CH_0488_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0003_Y_0000_Z_0000_CH_0488_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0003_Y_0000_Z_0000_CH_0561_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0003_Y_0000_Z_0000_CH_0561_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0003_Y_0000_Z_0000_CH_0638_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0003_Y_0000_Z_0000_CH_0638_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0004_Y_0000_Z_0000_CH_0405_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0004_Y_0000_Z_0000_CH_0405_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0004_Y_0000_Z_0000_CH_0488_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0004_Y_0000_Z_0000_CH_0488_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0004_Y_0000_Z_0000_CH_0561_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0004_Y_0000_Z_0000_CH_0561_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0004_Y_0000_Z_0000_CH_0638_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0004_Y_0000_Z_0000_CH_0638_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0005_Y_0000_Z_0000_CH_0405_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0005_Y_0000_Z_0000_CH_0405_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0005_Y_0000_Z_0000_CH_0488_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0005_Y_0000_Z_0000_CH_0488_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0005_Y_0000_Z_0000_CH_0561_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0005_Y_0000_Z_0000_CH_0561_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0005_Y_0000_Z_0000_CH_0638_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0005_Y_0000_Z_0000_CH_0638_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0006_Y_0000_Z_0000_CH_0405_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0006_Y_0000_Z_0000_CH_0405_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0006_Y_0000_Z_0000_CH_0488_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0006_Y_0000_Z_0000_CH_0488_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0006_Y_0000_Z_0000_CH_0561_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0006_Y_0000_Z_0000_CH_0561_cam1.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0006_Y_0000_Z_0000_CH_0638_cam0.zarr/', 'diSPIM_647403_2022-11-21_23-12-18/diSPIM.zarr/tile_X_0006_Y_0000_Z_0000_CH_0638_cam1.zarr/']:
             tile_name = Path(tile_path).name
             if tile_name == '.zgroup':
                 continue
@@ -273,6 +276,42 @@ class DiSpimDataset(ZarrDataset):
         self.theta = 45
         if camera_num == 1: 
             self.theta = -45
+
+# def list_directories_s3(bucket_name: str, 
+#                         directory: str):
+#     if directory.endswith('/') is False:
+#         directory = directory + '/'
+
+#     client = boto3.client('s3')
+#     result = client.list_objects(Bucket=bucket_name, Prefix=directory, Delimiter='/')
+
+#     files: list[str] = []
+#     for o in result.get('CommonPrefixes'):
+#         files.append(o.get('Prefix'))
+
+#     return files
+
+
+# def read_json_s3(bucket_name: str,
+#                  json_path: str) -> dict:
+
+#     s3 = boto3.resource("s3")
+#     content_object = s3.Object(bucket_name, json_path)
+
+#     try:
+#         file_content = content_object.get()["Body"].read().decode("utf-8")
+#         json_content = json.loads(file_content)
+#     except ClientError as ex:
+#         if ex.response["Error"]["Code"] == "NoSuchKey":
+#             json_content = {}
+#             print(
+#                 f"An error occurred when trying to read json file from {json_path}"
+#             )
+#         else:
+#             raise
+
+#     return json_content
+
 
 def open_zarr_gcs(bucket: str, path: str) -> ts.TensorStore:
     return ts.open({
