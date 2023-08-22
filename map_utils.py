@@ -690,7 +690,7 @@ def compose_maps_fast(
             query_coords,
             order=1,
             mode=mode,
-            cval=np.nan,
+            cval=0,
         )
         - ref1[-1]
     )
@@ -700,7 +700,7 @@ def compose_maps_fast(
             query_coords,
             order=1,
             mode=mode,
-            cval=np.nan,
+            cval=0,
         )
         - ref1[-2]
     )
@@ -710,7 +710,7 @@ def compose_maps_fast(
             query_coords,
             order=1,
             mode=mode,
-            cval=np.nan,
+            cval=0,
         )
         - ref1[-3]
     )
