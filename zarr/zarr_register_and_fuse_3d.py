@@ -309,211 +309,40 @@ class ZarrStitcher:
         fused_shape_5d = [1, 1, int(fused_z), int(fused_y), int(fused_x)]
         print(f'Fused shape before deskewing: {fused_shape_5d}')
         
-        # fused_shape_5d = [1, 1, 4000, 4000, 4000]
-        # print('Overriding fused shape to (1, 1, 4000, 4000, 4000)')
+        fused_shape_5d = [1, 1, 4000, 4000, 4000]
+        print('Overriding fused shape to (1, 1, 4000, 4000, 4000)')
 
         # Deskewing Correction
-        # if isinstance(self.input_zarr, zarr_io.DiSpimDataset):
-        #     deskew_factor = np.tan(np.deg2rad(self.input_zarr.theta))
-        #     deskew = np.array([[1, 0, 0], 
-        #                        [0, 1, 0], 
-        #                        [deskew_factor, 0, 1]])
+        if isinstance(self.input_zarr, zarr_io.DiSpimDataset):
+            deskew_factor = np.tan(np.deg2rad(self.input_zarr.theta))
+            deskew = np.array([[1, 0, 0], 
+                               [0, 1, 0], 
+                               [deskew_factor, 0, 1]])
             
-        #     # Apply deskewing: 
-        #     map_box = bounding_box.BoundingBox(
-        #         start=(0, 0, 0),
-        #         size=fine_mesh.shape[2:][::-1],
-        #     )
-        #     fine_mesh_index_to_xy = {
-        #         v: k for k, v in fine_mesh_xy_to_index.items()
-        #     }
-        #     for i in range(0, fine_mesh.shape[1]): 
-        #         tx, ty = fine_mesh_index_to_xy[i]
-        #         mini_mesh = fusion_mesh[:, i, ...]
-        #         tg_box = map_utils.outer_box(mini_mesh, map_box, fusion_stride_zyx)
+            # Apply deskewing: 
+            map_box = bounding_box.BoundingBox(
+                start=(0, 0, 0),
+                size=fine_mesh.shape[2:][::-1],
+            )
+            fine_mesh_index_to_xy = {
+                v: k for k, v in fine_mesh_xy_to_index.items()
+            }
+            for i in range(0, fine_mesh.shape[1]): 
+                tx, ty = fine_mesh_index_to_xy[i]
+                mini_mesh = fusion_mesh[:, i, ...]
+                tg_box = map_utils.outer_box(mini_mesh, map_box, fusion_stride_zyx)
 
-        #         out_box = bounding_box.BoundingBox(start=tg_box.start, size=mini_mesh.shape[1::])
+                out_box = bounding_box.BoundingBox(start=tg_box.start, size=mini_mesh.shape[1::])
 
-        #         deskew_matrix = np.array([[1, 0, 0, 0], 
-        #                                 [0, 1, 0, 0], 
-        #                                 [-1, 0, 1, 0]])
-        #         deskew_field = map_utils.make_affine_map(deskew_matrix, out_box, fusion_stride_zyx)
+                deskew_matrix = np.array([[1, 0, 0, 0], 
+                                        [0, 1, 0, 0], 
+                                        [-1, 0, 1, 0]])
+                deskew_field = map_utils.make_affine_map(deskew_matrix, out_box, fusion_stride_zyx)
                 
-        #         mini_mesh[np.isnan(mini_mesh)] = 0
-        #         deskew_field[np.isnan(deskew_field)] = 0
-        #         fusion_mesh[:, i, ...] = map_utils.compose_maps_fast(mini_mesh, out_box.start, fusion_stride_zyx,
-        #                                                         deskew_field, out_box.start, fusion_stride_zyx)
-
-            # Adjust fused shape
-            # fused_shape_5d[2] = fused_shape_5d[2] + int(np.abs(deskew_factor * fused_x))
-            # print(f'Fused shape after deskewing: {fused_shape_5d}')
-            
-            # TEMP: 
-            # fused_shape_5d = [1, 1, 4000, 4000, 4000]
-            # print(f'overriding shape: {fused_shape_5d}')
-
-
-            # Apply deskew transform to elastic mesh
-            # NOTE: y and z axes are the identity going through deskew
-            #       Only computation happens in the the x axis.
-            #       With axis order zyx, that corresponds to fusion_mesh[2, ...]
-
-            # NOTE: Commenting out to see what 'data_points, values' should be.
-            # tile_size_zyx = np.array(fusion_tile_size_zyx)
-            # tile_size_zyx = tile_size_zyx[:, np.newaxis, np.newaxis, np.newaxis, np.newaxis]
-            # abs_fusion_mesh = fusion_mesh - tile_size_zyx
-            
-            # Last try:
-            # Deskewing Matrix
-
-
-
-
-
-            # Affine Matrix
-            # affine_matrix = np.array([[0.5, 0, 0, 0], 
-            #                         [0, 2, 0, 0], 
-            #                         [0, 0, 1, 0]])
-            # affine_field = map_utils.make_affine_map(affine_matrix, out_box, fusion_stride_zyx)
-            # mesh += affine_field
-            
-
-
-            # # EXPERIMENTAL DESKEWING CODE
-            # TEMP: 
-            # Calculate coarse_mesh by averaging the mini-grid values of elastic mesh. 
-            # coarse_mesh = np.zeros((3, 1, abs_fusion_mesh.shape[1], 1))
-            # for i in range(abs_fusion_mesh.shape[1]):
-            #     coarse_mesh[0, 0, i, 0] = np.average(fusion_mesh[0, i, :, :, :])
-            #     coarse_mesh[1, 0, i, 0] = np.average(fusion_mesh[1, i, :, :, :])
-            #     coarse_mesh[2, 0, i, 0] = np.average(fusion_mesh[2, i, :, :, :])
-            # abs_coarse_mesh = coarse_mesh - tile_size_zyx
-
-            # # Center abs_fusion_mesh for deskewing
-            # translation_to_origin = abs_fusion_mesh[:, 0, 0, 0, 0]
-            # translation_to_origin = translation_to_origin[:, np.newaxis, np.newaxis, np.newaxis, np.newaxis]
-            # abs_fusion_mesh -= translation_to_origin
-
-            # # Add position vectors to each centered offset
-            # f0, f1, f2, f3, f4 = abs_fusion_mesh.shape
-            # Z, Y, X = np.mgrid[0: f2*fusion_stride_zyx[2] : fusion_stride_zyx[2], 
-            #                     0: f3*fusion_stride_zyx[1] : fusion_stride_zyx[1], 
-            #                     0: f4*fusion_stride_zyx[0] : fusion_stride_zyx[0]]
-            # Z = np.float16(Z)
-            # Y = np.float16(Y)
-            # X = np.float16(X)
-            # for i in range(f1):
-            #     abs_fusion_mesh[0, i, :, :, :] += Z
-            #     abs_fusion_mesh[1, i, :, :, :] += Y
-            #     abs_fusion_mesh[2, i, :, :, :] += X
-
-            # # Apply deskewing
-            # # abs_fusion_mesh[2, :, :, :, :] += (abs_fusion_mesh[0, :, :, :, :] * deskew_factor)
-            # abs_fusion_mesh[2, :, :, :, :] = abs_fusion_mesh[1, :, :, :, :]  # Testing another transform
-
-            # # Remove position information from abs_fusion_mesh
-            # for i in range(f1):
-            #     abs_fusion_mesh[0, i, :, :, :] -= Z
-            #     abs_fusion_mesh[1, i, :, :, :] -= Y
-            #     abs_fusion_mesh[2, i, :, :, :] -= X
-
-            # # Uncenter abs_fusion_mesh
-            # abs_fusion_mesh += translation_to_origin 
-
-            # Revert to canoncial SOFIMA inverse format
-            # fusion_mesh = abs_fusion_mesh + tile_size_zyx
-
-
-
-
-            # # Inital deskew attempt: 
-            # f0, f1, f2, f3, f4 = abs_fusion_mesh.shape
-            # Z, Y, X = np.mgrid[0: f2*fusion_stride_zyx[2] : fusion_stride_zyx[2], 
-            #                     0: f3*fusion_stride_zyx[1] : fusion_stride_zyx[1], 
-            #                     0: f4*fusion_stride_zyx[0] : fusion_stride_zyx[0]]
-            # Z = np.float16(Z)
-            # Y = np.float16(Y)
-            # X = np.float16(X)
-            # for t in range(f1):
-            #     # Send TL corner of each minigrid flowfield to origin
-            #     translation_to_origin = abs_fusion_mesh[:, t, 0, 0, 0]
-            #     translation_to_origin = translation_to_origin[:, np.newaxis, np.newaxis, np.newaxis]
-            #     abs_fusion_mesh[:, t, :, :, :] -= translation_to_origin
-
-            #     # Add mgrid to resolve absolute coordinates
-            #     abs_fusion_mesh[0, t, :, :, :] += Z
-            #     abs_fusion_mesh[1, t, :, :, :] += Y
-            #     abs_fusion_mesh[2, t, :, :, :] += X
-
-            #     # Deskew here
-            #     # abs_fusion_mesh[2, t, :, :, :] -= abs_fusion_mesh[0, t, :, :, :]
-            #     # Alternative def:
-            #     # abs_fusion_mesh[0, t, :, :, :] -= abs_fusion_mesh[2, t, :, :, :]
-
-            #     # Undo minigrid local coordinates
-            #     abs_fusion_mesh[0, t, :, :, :] -= Z
-            #     abs_fusion_mesh[1, t, :, :, :] -= Y
-            #     abs_fusion_mesh[2, t, :, :, :] -= X
-
-            #     # Restore minigrid flowfield to original position 
-            #     # in global coordinates
-            #     abs_fusion_mesh[:, t, :, :, :] += translation_to_origin
-
-            # # Revert to canoncial SOFIMA inverse format
-            # fusion_mesh = abs_fusion_mesh + tile_size_zyx
-            
-
-
-            # EXPERIMENTAL AFFINE CODE 
-            # (Working)
-            # Applying a rotation should work so long as 
-            # the origin for every image is the same. 
-            # Will not match bigstitcher coordinates, but the relative 
-            # positions of pixels will be identical. 
-
-            # Let's try applying a rotation matrix to every minigrid: 
-            # [[0, 1, 0], 
-            #  [1, 0, 0], 
-            #  [0, 0, 1]]  Here is a rotation about y=x, aka. transpose. 
-
-            # f0, f1, f2, f3, f4 = abs_fusion_mesh.shape
-            # Z, Y, X = np.mgrid[0: f2*fusion_stride_zyx[2] : fusion_stride_zyx[2], 
-            #                     0: f3*fusion_stride_zyx[1] : fusion_stride_zyx[1], 
-            #                     0: f4*fusion_stride_zyx[0] : fusion_stride_zyx[0]]
-            # Z = np.float16(Z)
-            # Y = np.float16(Y)
-            # X = np.float16(X)
-
-            # for t in range(abs_fusion_mesh.shape[1]):
-            #     # Send TL corner of each minigrid flowfield to origin
-            #     translation_to_origin = abs_fusion_mesh[:, t, 0, 0, 0]
-            #     translation_to_origin = translation_to_origin[:, np.newaxis, np.newaxis, np.newaxis]
-            #     abs_fusion_mesh[:, t, :, :, :] -= translation_to_origin
-
-            #     # Add mgrid to resolve absolute coordinates
-            #     abs_fusion_mesh[0, t, :, :, :] += Z
-            #     abs_fusion_mesh[1, t, :, :, :] += Y
-            #     abs_fusion_mesh[2, t, :, :, :] += X
-
-            #     # Apply rotation
-            #     # tmp = np.copy(abs_fusion_mesh[0, t, :, :, :])
-            #     # abs_fusion_mesh[0, t, :, :, :] = abs_fusion_mesh[1, t, :, :, :]
-            #     # abs_fusion_mesh[1, t, :, :, :] = abs_fusion_mesh[0, t, :, :, :]
-            #     # abs_fusion_mesh[1, t, :, :, :] = tmp
-            #     # abs_fusion_mesh[0, t, :, :, :], abs_fusion_mesh[1, t, :, :, :] = abs_fusion_mesh[1, t, :, :, :], abs_fusion_mesh[0, t, :, :, :]
-
-            #     # Undo minigrid local coordinates
-            #     abs_fusion_mesh[0, t, :, :, :] -= Z
-            #     abs_fusion_mesh[1, t, :, :, :] -= Y
-            #     abs_fusion_mesh[2, t, :, :, :] -= X
-
-            #     # Restore minigrid flowfield to original position 
-            #     # in global coordinates
-            #     abs_fusion_mesh[:, t, :, :, :] += translation_to_origin
-
-            # # Revert to canoncial SOFIMA inverse format
-            # fusion_mesh = abs_fusion_mesh + tile_size_zyx
-
+                mini_mesh[np.isnan(mini_mesh)] = 0
+                deskew_field[np.isnan(deskew_field)] = 0
+                fusion_mesh[:, i, ...] = map_utils.compose_maps_fast(mini_mesh, out_box.start, fusion_stride_zyx,
+                                                                deskew_field, out_box.start, fusion_stride_zyx)
 
         # Calculate crop offset
         start = np.array([np.inf, np.inf, np.inf])
@@ -550,9 +379,6 @@ class ZarrStitcher:
         # TEMP: 
         # crop_offset = np.array([0, 800, 0])
         # print(f'overriding crop offset: {crop_offset}')
-
-        # Looks like this crop offset breaks too. Sigh. 
-
 
         # INPUT FORMATTING: 
         # Save rescaled/deskewed mesh back into .npz volume
