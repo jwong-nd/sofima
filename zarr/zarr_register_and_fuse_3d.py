@@ -390,7 +390,9 @@ class ZarrStitcher:
                             stride_zyx=fusion_stride_zyx)
 
         # Perform fusion
-        ds_out = zarr_io.write_zarr(output_bucket, fused_shape_5d, output_path)
+        # ds_out = zarr_io.write_zarr(output_bucket, fused_shape_5d, output_path)
+        ds_out = zarr_io.write_zarr_local(fused_shape_5d)
+
         renderer = ZarrFusion(zarr_params=fusion_zarr, 
                               tile_mesh_path=modified_mesh_path,
                               stride_zyx=fusion_stride_zyx,

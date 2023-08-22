@@ -370,3 +370,33 @@ def write_zarr(bucket: str, shape: list, path: str):
         'zarr_format': 2
         }
     }).result()
+
+
+def write_zarr_local(shape: list): 
+    ts.open({
+        'driver': 'zarr', 
+        'dtype': 'uint16',
+        'kvstore' : {
+            'driver': 'file', 
+            'bucket': 'tmp/dataset',
+        }, 
+        'create': True,
+        'delete_existing': True, 
+        'metadata': {
+        'chunks': [1, 1, 128, 256, 256],
+        'compressor': {
+          'blocksize': 0,
+          'clevel': 1,
+          'cname': 'zstd',
+          'id': 'blosc',
+          'shuffle': 1,
+        },
+        'dimension_separator': '/',
+        'dtype': '<u2',
+        'fill_value': 0,
+        'filters': None,
+        'order': 'C',
+        'shape': shape,  
+        'zarr_format': 2
+        }
+    }).result()
